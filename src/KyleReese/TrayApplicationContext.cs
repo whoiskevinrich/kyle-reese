@@ -14,16 +14,37 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private readonly NotifyIcon _trayIcon;
     private readonly Icon _icon;
+    private readonly ToolStripMenuItem _startWithWindowsItem;
     private readonly ProcessKiller _killer = new(new SystemProcessProvider());
 
     public TrayApplicationContext()
     {
+        // If the user previously enabled "Start with Windows" and the exe has since moved or been
+        // updated, repoint the Run-key entry at this executable. Never fatal: a failure here must
+        // not stop the tray app from launching.
+        try
+        {
+            StartupManager.RefreshIfRegistered();
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            // Best-effort; the menu still lets the user re-toggle it manually.
+        }
+
         _icon = LoadAppIcon();
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("&Stop runaway processes", null, (_, _) => StopProcesses());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("&Edit kill list…", null, (_, _) => EditKillList());
+        _startWithWindowsItem = new ToolStripMenuItem(
+            "Start with &Windows", null, (_, _) => ToggleStartWithWindows())
+        {
+            CheckOnClick = false,
+        };
+        menu.Items.Add(_startWithWindowsItem);
+        // Reflect the current registry state each time the menu opens, in case it changed elsewhere.
+        menu.Opening += (_, _) => _startWithWindowsItem.Checked = StartupManager.IsEnabled();
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("E&xit", null, (_, _) => ExitApp());
 
@@ -123,6 +144,31 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             MessageBox.Show(
                 $"Could not open the kill list:{Environment.NewLine}{ex.Message}",
+                AppName,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private void ToggleStartWithWindows()
+    {
+        try
+        {
+            if (StartupManager.IsEnabled())
+            {
+                StartupManager.Disable();
+            }
+            else
+            {
+                StartupManager.Enable();
+            }
+
+            _startWithWindowsItem.Checked = StartupManager.IsEnabled();
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            MessageBox.Show(
+                $"Could not change the Windows startup setting:{Environment.NewLine}{ex.Message}",
                 AppName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
