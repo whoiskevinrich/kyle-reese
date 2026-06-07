@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KyleReese.Core/KyleReese.Core.csproj" />
+    <Project Path="src/KyleReese/KyleReese.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KyleReese.Core.Tests/KyleReese.Core.Tests.csproj" />
+  </Folder>
+</Solution>
