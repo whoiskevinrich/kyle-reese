@@ -13,10 +13,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private const string AppName = "Kyle Reese";
 
     private readonly NotifyIcon _trayIcon;
+    private readonly Icon _icon;
     private readonly ProcessKiller _killer = new(new SystemProcessProvider());
 
     public TrayApplicationContext()
     {
+        _icon = LoadAppIcon();
+
         var menu = new ContextMenuStrip();
         menu.Items.Add("&Stop runaway processes", null, (_, _) => StopProcesses());
         menu.Items.Add(new ToolStripSeparator());
@@ -26,12 +29,35 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _trayIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Error,
+            Icon = _icon,
             Text = $"{AppName} — click to stop runaway processes",
             Visible = true,
             ContextMenuStrip = menu,
         };
         _trayIcon.DoubleClick += (_, _) => StopProcesses();
+    }
+
+    /// <summary>
+    /// Loads the embedded app icon. Always returns an owned <see cref="Icon"/> (falling back to a
+    /// clone of the system error icon) so it can be disposed safely.
+    /// </summary>
+    private static Icon LoadAppIcon()
+    {
+        var assembly = typeof(TrayApplicationContext).Assembly;
+        var resourceName = Array.Find(
+            assembly.GetManifestResourceNames(),
+            n => n.EndsWith("app.ico", StringComparison.OrdinalIgnoreCase));
+
+        if (resourceName is not null)
+        {
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream is not null)
+            {
+                return new Icon(stream);
+            }
+        }
+
+        return (Icon)SystemIcons.Error.Clone();
     }
 
     private void StopProcesses()
@@ -114,6 +140,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (disposing)
         {
             _trayIcon.Dispose();
+            _icon.Dispose();
         }
 
         base.Dispose(disposing);

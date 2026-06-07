@@ -7,6 +7,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
 
     <!-- Single-file, self-contained win-x64 publish (see CLAUDE.md) -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -17,6 +18,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\KyleReese.Core\KyleReese.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embed the icon so the tray can load it at runtime (works in single-file publish). -->
+    <EmbeddedResource Include="app.ico" />
   </ItemGroup>
 
 </Project>
