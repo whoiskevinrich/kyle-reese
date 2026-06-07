@@ -58,10 +58,80 @@ jobs:
           dotnet publish src/KyleReese/KyleReese.csproj -c Release -o publish
           -p:Version=${{ steps.ver.outputs.version }}
 
+      # Builds a human-readable, categorized changelog from the conventional-commit history since
+      # the last tag (the same commits the version bump is derived from). Written to a file and
+      # passed to the release via body_path.
+      - name: Generate changelog
+        shell: pwsh
+        run: |
+          $prev  = "${{ steps.ver.outputs.previous_tag }}"
+          $tag   = "${{ steps.ver.outputs.version_tag }}"
+          $repo  = "${{ github.repository }}"
+          $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
+
+          $US = [char]0x1f  # field separator within a commit
+          $RS = [char]0x1e  # record separator between commits
+          $raw = git log $range --no-merges --pretty=format:"%H$US%s$US%b$RS" | Out-String
+
+          # Sections render in this order; only non-empty ones are emitted.
+          $sections = [ordered]@{
+            breaking = @{ Title = '### ⚠️ Breaking Changes'; Items = [System.Collections.Generic.List[string]]::new() }
+            feat     = @{ Title = '### 🚀 Features';          Items = [System.Collections.Generic.List[string]]::new() }
+            fix      = @{ Title = '### 🐛 Bug Fixes';         Items = [System.Collections.Generic.List[string]]::new() }
+            perf     = @{ Title = '### ⚡ Performance';        Items = [System.Collections.Generic.List[string]]::new() }
+            other    = @{ Title = '### 🧹 Other Changes';     Items = [System.Collections.Generic.List[string]]::new() }
+          }
+
+          $bt = '`'  # literal backtick for wrapping the short hash in markdown
+          foreach ($rec in ($raw -split $RS)) {
+            if (-not $rec.Trim()) { continue }
+            $parts   = $rec -split $US
+            $hash    = $parts[0].Trim()
+            $subject = $parts[1].Trim()
+            $body    = if ($parts.Count -gt 2) { $parts[2] } else { '' }
+
+            if ($subject -match '^(?<type>\w+)(\((?<scope>[^)]+)\))?(?<bang>!)?:\s*(?<desc>.+)$') {
+              $type = $Matches.type.ToLower(); $scope = $Matches.scope
+              $bang = $Matches.bang;           $desc  = $Matches.desc.Trim()
+            } else {
+              $type = 'other'; $scope = ''; $bang = ''; $desc = $subject
+            }
+
+            $short  = $hash.Substring(0, 7)
+            $prefix = if ($scope) { "**${scope}:** " } else { '' }
+            $line   = "- $prefix$desc ($bt$short$bt)"
+
+            $bucket = if ($sections.Contains($type)) { $type } else { 'other' }
+            $sections[$bucket].Items.Add($line)
+            if ($bang -eq '!' -or $body -match 'BREAKING CHANGE') {
+              $sections['breaking'].Items.Add($line)
+            }
+          }
+
+          $sb = [System.Text.StringBuilder]::new()
+          [void]$sb.AppendLine("## What's Changed").AppendLine('')
+          $any = $false
+          foreach ($key in $sections.Keys) {
+            $sec = $sections[$key]
+            if ($sec.Items.Count -eq 0) { continue }
+            $any = $true
+            [void]$sb.AppendLine($sec.Title)
+            foreach ($item in $sec.Items) { [void]$sb.AppendLine($item) }
+            [void]$sb.AppendLine('')
+          }
+          if (-not $any) { [void]$sb.AppendLine('- No notable changes.').AppendLine('') }
+          if ($prev) {
+            [void]$sb.AppendLine("**Full Changelog**: https://github.com/$repo/compare/$prev...$tag")
+          }
+
+          $sb.ToString() | Out-File -FilePath release-notes.md -Encoding utf8
+          Write-Host '----- release-notes.md -----'
+          Get-Content release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.ver.outputs.version_tag }}
           name: ${{ steps.ver.outputs.version_tag }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: publish/KyleReese.exe
