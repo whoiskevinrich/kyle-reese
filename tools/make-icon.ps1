@@ -1,60 +1,52 @@
-# Generates src/KyleReese/app.ico — a red stop-sign octagon with a white "stop" glyph.
+# Builds src/KyleReese/app.ico from tools/icon-source.jpg.
+# Center-crops the source to a square, then high-quality resamples it into a
+# multi-resolution icon (16-256px) packed as PNG frames.
 # Run with Windows PowerShell 5.1 (has System.Drawing built in):
 #   powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\make-icon.ps1
+param(
+    [string]$Source = (Join-Path $PSScriptRoot 'icon-source.jpg'),
+    [string]$Output = (Join-Path $PSScriptRoot '..\src\KyleReese\app.ico')
+)
+
 Add-Type -AssemblyName System.Drawing
 
 $sizes = 16, 24, 32, 48, 64, 128, 256
-$red   = [System.Drawing.Color]::FromArgb(255, 211, 47, 47)   # stop-sign red
-$white = [System.Drawing.Color]::White
+
+$src = [System.Drawing.Image]::FromFile([System.IO.Path]::GetFullPath($Source))
+
+# Largest centered square that fits in the source.
+$side = [Math]::Min($src.Width, $src.Height)
+$srcX = [int](($src.Width - $side) / 2)
+$srcY = [int](($src.Height - $side) / 2)
+$cropRect = New-Object System.Drawing.Rectangle($srcX, $srcY, $side, $side)
 
 function New-FramePng([int]$s) {
     $bmp = New-Object System.Drawing.Bitmap($s, $s, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.InterpolationMode  = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode    = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+    $g.SmoothingMode      = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $g.Clear([System.Drawing.Color]::Transparent)
 
-    # Flat-top regular octagon (stop sign), inscribed with a small margin.
-    $cx = $s / 2.0; $cy = $s / 2.0
-    $r  = ($s / 2.0) * 0.96
-    $pts = New-Object 'System.Drawing.PointF[]' 8
-    for ($i = 0; $i -lt 8; $i++) {
-        $ang = [Math]::PI / 180.0 * (22.5 + 45.0 * $i)
-        $pts[$i] = New-Object System.Drawing.PointF(
-            [float]($cx + $r * [Math]::Cos($ang)),
-            [float]($cy + $r * [Math]::Sin($ang)))
-    }
-
-    $brush = New-Object System.Drawing.SolidBrush($red)
-    $g.FillPolygon($brush, $pts)
-
-    # White rim.
-    $penW = [Math]::Max(1.0, $s * 0.06)
-    $pen  = New-Object System.Drawing.Pen($white, [float]$penW)
-    $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-    $g.DrawPolygon($pen, $pts)
-
-    # White "stop" square in the centre.
-    $side = $s * 0.40
-    $rect = New-Object System.Drawing.RectangleF(
-        [float]($cx - $side / 2.0), [float]($cy - $side / 2.0), [float]$side, [float]$side)
-    $wbrush = New-Object System.Drawing.SolidBrush($white)
-    $g.FillRectangle($wbrush, $rect)
+    $destRect = New-Object System.Drawing.Rectangle(0, 0, $s, $s)
+    $g.DrawImage($src, $destRect, $cropRect, [System.Drawing.GraphicsUnit]::Pixel)
 
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-
-    $brush.Dispose(); $pen.Dispose(); $wbrush.Dispose(); $g.Dispose(); $bmp.Dispose()
+    $g.Dispose(); $bmp.Dispose()
     return , $ms.ToArray()
 }
 
 $frames = foreach ($s in $sizes) { , (New-FramePng $s) }
+$src.Dispose()
 
 $out = New-Object System.IO.MemoryStream
 $bw  = New-Object System.IO.BinaryWriter($out)
 
 # ICONDIR
-$bw.Write([uint16]0)              # reserved
-$bw.Write([uint16]1)              # type = icon
+$bw.Write([uint16]0)             # reserved
+$bw.Write([uint16]1)             # type = icon
 $bw.Write([uint16]$sizes.Count)  # image count
 
 # ICONDIRENTRY records
@@ -78,9 +70,8 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($data in $frames) { $bw.Write($data) }
 
 $bw.Flush()
-$target = Join-Path $PSScriptRoot '..\src\KyleReese\app.ico'
-$target = [System.IO.Path]::GetFullPath($target)
+$target = [System.IO.Path]::GetFullPath($Output)
 [System.IO.File]::WriteAllBytes($target, $out.ToArray())
 $bw.Dispose(); $out.Dispose()
 
-Write-Output "Wrote $target ($($sizes.Count) frames: $($sizes -join ', '))"
+Write-Output "Wrote $target ($($sizes.Count) frames: $($sizes -join ', ')) from $Source"
